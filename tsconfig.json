@@ -19,7 +19,6 @@
     },
     "include": [
         "index.ts",
-        "client.ts",
     ],
     "exclude": [
         "node_modules"
