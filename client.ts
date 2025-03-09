@@ -6,7 +6,7 @@ const transport = new StdioClientTransport({
   args: ["server.ts"],
 });
 
-const client = new Client(
+export const client = new Client(
   {
     name: "example-client",
     version: "1.0.0",
@@ -20,7 +20,9 @@ const client = new Client(
   }
 );
 
-await client.connect(transport);
+export async function connectClient() {
+  await client.connect(transport);
+}
 
 // Call a tool
 const result = await client.callTool({
@@ -31,3 +33,6 @@ const result = await client.callTool({
 });
 
 console.log(result);
+const tools = await client.listTools();
+console.log(tools);
+await client.close();

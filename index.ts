@@ -2,6 +2,30 @@ import Anthropic from "@anthropic-ai/sdk";
 import * as readlineSync from "readline-sync";
 import * as dotenv from "dotenv";
 
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
+const transport = new StdioClientTransport({
+  command: "tsx",
+  args: ["server.ts"],
+});
+
+export const client = new Client(
+  {
+    name: "example-client",
+    version: "1.0.0",
+  },
+  {
+    capabilities: {
+      prompts: {},
+      resources: {},
+      tools: {},
+    },
+  }
+);
+
+await client.connect(transport);
+
 // 환경 변수 로드
 dotenv.config();
 
@@ -26,7 +50,78 @@ async function sendMessage(userInput: string) {
       model: "claude-3-7-sonnet-latest",
       max_tokens: 1000,
       messages: [{ role: "user", content: userInput }],
+      tools: [
+        {
+          name: "getWeather",
+          description: "현재 날씨 정보를 가져옵니다",
+          input_schema: {
+            type: "object",
+            properties: {
+              city: {
+                type: "string",
+                description: "날씨를 확인할 도시 이름",
+              },
+            },
+            required: ["city"],
+          },
+        },
+      ],
     });
+
+    const useTool =
+      response.content.length <= 2
+        ? response.content.find((content) => content.type === "tool_use")
+        : null;
+
+    if (useTool) {
+      const toolResult = await client.callTool({
+        name: useTool.name,
+        arguments: useTool.input as Record<string, unknown>,
+      });
+      const responseWithTool = await anthropic.messages.create({
+        model: "claude-3-7-sonnet-latest",
+        max_tokens: 1000,
+        messages: [
+          { role: "user", content: userInput },
+          { role: "assistant", content: response.content },
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: useTool.id,
+                // @ts-ignore
+                content: toolResult.content,
+              },
+            ],
+          },
+        ],
+        tools: [
+          {
+            name: "getWeather",
+            description: "현재 날씨 정보를 가져옵니다",
+            input_schema: {
+              type: "object",
+              properties: {
+                city: {
+                  type: "string",
+                  description: "날씨를 확인할 도시 이름",
+                },
+              },
+              required: ["city"],
+            },
+          },
+        ],
+      });
+      if (
+        responseWithTool.content[0] &&
+        "text" in responseWithTool.content[0]
+      ) {
+        return responseWithTool.content[0].text as string;
+      } else {
+        return JSON.stringify(responseWithTool.content[0]);
+      }
+    }
 
     if (response.content[0] && "text" in response.content[0]) {
       return response.content[0].text as string;
@@ -49,6 +144,7 @@ async function main() {
     const userInput = readlineSync.question("\n사용자: ");
 
     if (userInput.toLowerCase() === "exit") {
+      await client.close();
       console.log("대화를 종료합니다.");
       break;
     }
@@ -58,6 +154,10 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error("프로그램 실행 오류:", error);
-});
+main()
+  .catch((error) => {
+    console.error("프로그램 실행 오류:", error);
+  })
+  .finally(async () => {
+    await client.close();
+  });
